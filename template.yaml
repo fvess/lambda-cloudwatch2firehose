@@ -1,0 +1,72 @@
+Description: Firehose data transformation function for CloudWatch logs
+
+Parameters:
+
+    FunctionName:
+        Type: String
+
+Resources:
+
+    LambdaFunction:
+        Type: AWS::Lambda::Function
+        Properties:
+            FunctionName: !Ref FunctionName
+            Role: !GetAtt LambdaExecutionRole.Arn
+            Runtime: "python3.6"
+            Handler: "index.handler"
+            Timeout: "60"
+            MemorySize: 128
+            Code:
+                ZipFile: !Sub |
+                    import base64
+                    import gzip
+                    import json
+
+                    def handler(event, context):
+                        output = []
+                        for record in event['records']:
+                            compressed_payload = base64.b64decode(record['data'])
+                            uncompressed_payload = gzip.decompress(compressed_payload)
+                            payload = json.loads(uncompressed_payload)
+                            output_record = {
+                                'recordId': record['recordId'],
+                                'data': base64.b64encode(json.dumps(payload).encode('utf-8')).decode('utf-8'),
+                                'result': 'Ok'
+                            }
+                            output.append(output_record)
+                        return {'records': output}
+
+    LambdaExecutionRole:
+        Type: AWS::IAM::Role
+        Properties:
+            Path: /
+            RoleName: LambdaFirehoseRole
+            AssumeRolePolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                        Service: lambda.amazonaws.com
+                    Action: sts:AssumeRole
+            Policies:
+              - PolicyName: lambda-execution
+                PolicyDocument:
+                    Version: '2012-10-17'
+                    Statement:
+                      - Effect: Allow
+                        Action:
+                        - lambda:InvokeFunction
+                        - lambda:GetFunctionConfiguration
+                        - logs:PutLogEvents
+                        - firehose:*
+                        Resource: '*'
+
+Outputs:
+
+    LambdaFunctionARN:
+        Description: Lambda Function ARN
+        Value: !GetAtt LambdaFunction.Arn
+
+    LambdaRoleARN:
+        Description: Lambda Role ARN
+        Value: !GetAtt LambdaExecutionRole.Arn
